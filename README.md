@@ -546,6 +546,19 @@ File System Events → File Watcher → Sync Engine → Cloud Provider
 - **Rate Limiting**: Configurable concurrency limits
 - **Graceful Shutdown**: Proper resource cleanup
 
+## Docker Deployment
+```bash
+# Build image
+docker build -t cloudawsync:latest .
+
+# Run container
+docker-compose up -d
+
+# View logs
+docker-compose logs -f cloudawsync
+```
+
+
 ## Security Considerations
 
 ### File System Security
@@ -598,7 +611,7 @@ CloudAWSync/
 │   ├── config/                 # Configuration management
 │   ├── interfaces/             # Core interfaces
 │   ├── providers/              # Cloud provider implementations
-│   │   └── s3.go              # AWS S3 provider
+│   │   └── s3.go               # AWS S3 provider
 │   ├── watcher/                # File system watching
 │   ├── engine/                 # Sync engine
 │   ├── metrics/                # Metrics collection
