@@ -1,0 +1,40 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+
+# Output of go build / go install
+/build/
+/bin/
+/dist/
+
+# Go workspace file
+go.work
+
+# Go module cache
+/pkg/
+
+# Vendor directory (if using vendoring)
+vendor/
+
+# IDE/editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs and debug
+*.log
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+
+# Coverage files
+coverage.out
+
+# Dependency tools
+Gopkg.lock

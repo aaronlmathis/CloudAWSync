@@ -1,0 +1,138 @@
+# Sample CloudAWSync Configuration
+# Edit this file to configure your cloud file synchronization settings
+
+# AWS Configuration
+aws:
+  region: "us-east-1"
+  s3_bucket: "my-backup-bucket"  # REQUIRED: Set your S3 bucket name
+  s3_prefix: "cloudawsync/"      # Optional: Prefix for all uploaded files
+  
+  # AWS Credentials (can also be set via environment variables or IAM roles)
+  access_key_id: ""              # Set to your AWS Access Key ID
+  secret_access_key: ""          # Set to your AWS Secret Access Key
+  session_token: ""              # Optional: For temporary credentials
+  
+  # Custom S3 endpoint for S3-compatible services (optional)
+  endpoint: ""                   # e.g., "https://s3.amazonaws.com"
+
+# Directories to synchronize
+directories:
+  # Example 1: Real-time sync of Documents folder
+  - local_path: "/home/user/Documents"
+    remote_path: "documents"
+    sync_mode: "realtime"        # "realtime", "scheduled", or "both"
+    schedule: ""                 # Not needed for realtime mode
+    recursive: true              # Sync subdirectories
+    enabled: true                # Enable this directory
+    filters:                     # Exclude these file patterns
+      - "*.tmp"
+      - "*.lock"
+      - "*.swp"
+      - ".DS_Store"
+      - "Thumbs.db"
+
+  # Example 2: Scheduled sync of Pictures folder
+  - local_path: "/home/user/Pictures"
+    remote_path: "pictures"
+    sync_mode: "scheduled"
+    schedule: "0 2 * * *"        # Daily at 2:00 AM (cron format)
+    recursive: true
+    enabled: false               # Disabled by default - enable when ready
+    filters:
+      - "*.tmp"
+      - "Thumbs.db"
+      - ".thumbnails"
+
+  # Example 3: Hybrid sync (both realtime and scheduled)
+  - local_path: "/home/user/Projects"
+    remote_path: "projects"
+    sync_mode: "both"
+    schedule: "0 0 * * 0"        # Weekly backup on Sunday at midnight
+    recursive: true
+    enabled: false
+    filters:
+      - "node_modules"
+      - ".git"
+      - "*.log"
+      - "*.tmp"
+
+# Logging Configuration
+logging:
+  level: "info"                  # "debug", "info", "warn", "error"
+  format: "json"                 # "json" or "text"
+  output_path: "/var/log/cloudawsync/cloudawsync.log"  # or "stdout"
+  max_size: 100                  # Max log file size in MB
+  max_age: 30                    # Keep logs for 30 days
+  max_backups: 10                # Keep 10 backup files
+  compress: true                 # Compress old log files
+
+# Metrics and Monitoring
+metrics:
+  enabled: true                  # Enable Prometheus metrics
+  port: 9090                     # Metrics server port
+  path: "/metrics"               # Metrics endpoint path
+  collect_interval: "30s"        # System metrics collection interval
+
+# Security Settings
+security:
+  encryption_enabled: true       # Enable S3 server-side encryption
+  encryption_key: ""             # Optional: Custom encryption key
+  max_file_size: 104857600       # Max file size to sync (100MB)
+  allowed_extensions: []         # Whitelist file extensions (empty = all allowed)
+  denied_extensions:             # Blacklist file extensions
+    - ".tmp"
+    - ".lock"
+    - ".swp"
+
+# Performance Configuration
+performance:
+  max_concurrent_uploads: 5      # Number of simultaneous uploads
+  max_concurrent_downloads: 5    # Number of simultaneous downloads
+  upload_chunk_size: 5242880     # Upload chunk size (5MB)
+  download_chunk_size: 5242880   # Download chunk size (5MB)
+  retry_attempts: 3              # Number of retry attempts on failure
+  retry_delay: "5s"              # Delay between retries
+  timeout_duration: "30s"        # Operation timeout
+  bandwidth_limit: 0             # Bandwidth limit in bytes/sec (0 = unlimited)
+
+# SystemD Service Configuration
+systemd:
+  service_name: "cloudawsync"
+  working_dir: "/opt/cloudawsync"
+  user: "cloudawsync"
+  group: "cloudawsync"
+  restart_policy: "always"
+  log_level: "info"
+
+# Configuration Notes:
+#
+# 1. AWS Credentials:
+#    - Can be set in this file, environment variables, or IAM roles
+#    - Environment variables: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+#    - IAM roles are recommended for EC2 instances
+#
+# 2. Sync Modes:
+#    - "realtime": Immediate sync on file changes
+#    - "scheduled": Sync at specified times (cron format)
+#    - "both": Combination of realtime and scheduled
+#
+# 3. Cron Schedule Format:
+#    - Minute Hour Day Month Weekday
+#    - "0 2 * * *" = Every day at 2:00 AM
+#    - "0 0 * * 0" = Every Sunday at midnight
+#    - "*/15 * * * *" = Every 15 minutes
+#
+# 4. File Filters:
+#    - Use glob patterns to exclude files
+#    - "*.tmp" excludes all .tmp files
+#    - "node_modules" excludes directories named node_modules
+#
+# 5. Security:
+#    - Always use encryption in production
+#    - Set appropriate file size limits
+#    - Use file filters to exclude sensitive files
+#
+# 6. Performance:
+#    - Adjust concurrency based on system resources
+#    - Larger chunk sizes = better throughput, more memory usage
+#    - Set bandwidth limits if needed for network management

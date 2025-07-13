@@ -296,7 +296,28 @@ directories:
     recursive: true
     enabled: true
 ```
+### Advanced Configuration
+```yaml
+performance:
+  max_concurrent_uploads: 10
+  max_concurrent_downloads: 5
+  upload_chunk_size: 10485760  # 10MB
+  retry_attempts: 5
+  bandwidth_limit: 10485760    # 10MB/s
 
+security:
+  encryption_enabled: true
+  max_file_size: 1073741824    # 1GB
+  denied_extensions:
+    - "*.tmp"
+    - "*.lock"
+    - ".DS_Store"
+
+metrics:
+  enabled: true
+  port: 9090
+  collect_interval: "30s"
+```
 #### Service Management
 
 ```bash
