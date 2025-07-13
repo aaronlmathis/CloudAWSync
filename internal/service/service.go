@@ -120,6 +120,9 @@ func (s *Service) Start() error {
 	}
 	s.logger.Info("Sync engine started successfully")
 
+	// Perform initial sync for all directories in the background
+	go s.performInitialSync()
+
 	s.running = true
 	s.logger.Info("CloudAWSync service started successfully")
 
@@ -284,6 +287,33 @@ func (s *Service) Wait() {
 	if s.ctx != nil {
 		<-s.ctx.Done()
 	}
+}
+
+// performInitialSync runs a one-time sync for all enabled directories on startup.
+// This ensures that any files that already exist locally are uploaded if they
+// are missing or outdated in the cloud.
+func (s *Service) performInitialSync() {
+	s.logger.Info("Performing initial startup sync for all configured directories")
+
+	var wg sync.WaitGroup
+	for _, dir := range s.config.Directories {
+		if dir.Enabled {
+			wg.Add(1)
+			// Run each directory sync in its own goroutine for parallel execution
+			go func(d interfaces.SyncDirectory) {
+				defer wg.Done()
+				s.logger.Info("Starting initial sync for directory", zap.String("local_path", d.LocalPath))
+				if err := s.engine.Sync(s.ctx, d); err != nil {
+					s.logger.Error("Initial sync failed for directory",
+						zap.String("local_path", d.LocalPath),
+						zap.Error(err))
+				}
+			}(dir)
+		}
+	}
+
+	wg.Wait()
+	s.logger.Info("Initial startup sync process completed for all directories")
 }
 
 // initializeComponents initializes all service components

@@ -59,7 +59,25 @@ check_dependencies() {
         log_error "systemctl is not available. This script requires systemd."
         exit 1
     fi
-    
+
+    # Check yq
+    if ! command -v yq &> /dev/null; then
+        log_warning "yq is not installed. Installing yq..."
+        # Check which package manager is available
+        if command -v apt-get &> /dev/null; then
+            apt-get update
+            apt-get install -y yq
+        elif command -v dnf &> /dev/null; then
+            dnf install -y yq
+        elif command -v yum &> /dev/null; then
+            yum install -y epel-release
+            yum install -y yq
+        else
+            log_error "Unsupported package manager. Please install yq manually."
+            exit 1
+        fi
+    fi    
+
     log_success "Dependencies checked"
 }
 
@@ -106,25 +124,83 @@ build_application() {
 
 install_config() {
     log_info "Installing configuration..."
-    
-    # Generate sample config
-    "$INSTALL_DIR/cloudawsync" -generate-config
-    mv cloudawsync-config.yaml "$CONFIG_DIR/config.yaml"
-    chown root:root "$CONFIG_DIR/config.yaml"
-    chmod 644 "$CONFIG_DIR/config.yaml"
-    
-    # Copy example config
-    if [ -f "config.yaml.example" ]; then
+
+    # Check if config file already exists
+    if [ -f "$CONFIG_DIR/config.yaml" ]; then
+        log_warning "Existing configuration file found at $CONFIG_DIR/config.yaml. Skipping creation."
+    else
+        # Generate sample config
+        log_info "Generating new sample configuration..."
+        "$INSTALL_DIR/cloudawsync" -generate-config
+        mv cloudawsync-config.yaml "$CONFIG_DIR/config.yaml"
+        chown root:root "$CONFIG_DIR/config.yaml"
+        chmod 644 "$CONFIG_DIR/config.yaml"
+        log_success "Installed new configuration file."
+    fi
+
+    # Copy example config if it exists in source and not in destination
+    if [ -f "config.yaml.example" ] && [ ! -f "$CONFIG_DIR/config.yaml.example" ]; then
         cp config.yaml.example "$CONFIG_DIR/config.yaml.example"
         chmod 644 "$CONFIG_DIR/config.yaml.example"
     fi
-    
-    log_success "Installed configuration files"
 }
 
 install_systemd_service() {
     log_info "Installing systemd service..."
-    
+
+    # Install the fix-permissions helper script
+    FIX_SCRIPT="/opt/cloudawsync/cloudawsync-fix-perms.sh"
+    CONFIG_FILE="$CONFIG_DIR/config.yaml"
+    cat > "$FIX_SCRIPT" << EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONFIG_FILE="$CONFIG_FILE"
+SERVICE_USER="$SERVICE_USER"
+
+if ! command -v yq >/dev/null 2>&1; then
+    echo "Error: yq is required but not installed. Install it (e.g., 'sudo apt install yq')."
+    exit 1
+fi
+
+echo "Reading configured directories from \$CONFIG_FILE"
+
+CONFIG_FILE="$CONFIG_FILE"
+SERVICE_USER="$SERVICE_USER"
+
+if ! command -v yq >/dev/null 2>&1; then
+    echo "Error: yq is required but not installed. Install it (e.g., 'sudo apt install yq')."
+    exit 1
+fi
+
+echo "Reading configured directories from \$CONFIG_FILE"
+
+DIRS=$(yq '.directories[] | select(.enabled == true) | .localpath' "$CONFIG_FILE" | tr -d '"')
+
+if [ -z "\$DIRS" ]; then
+    echo "No enabled directories found in config. Nothing to do."
+    exit 0
+fi
+
+for dir in \$DIRS; do
+    dir_cleaned=\$(echo "\$dir" | tr -d '"')
+
+    if [ -d "\$dir_cleaned" ]; then
+        echo "Setting ACL for: \$dir_cleaned"
+        setfacl -m u:"\$SERVICE_USER":rwX "\$dir_cleaned"
+    else
+        echo "Warning: Directory \$dir_cleaned does not exist, skipping."
+    fi
+done
+
+echo "Permission fix completed."
+EOF
+
+    chmod 700 "$FIX_SCRIPT"
+    chown root:root "$FIX_SCRIPT"
+    log_success "Installed fix-permissions helper script at $FIX_SCRIPT"
+
+    # Write systemd unit file
     cat > /etc/systemd/system/cloudawsync.service << EOF
 [Unit]
 Description=CloudAWSync - Cloud File Synchronization Agent
@@ -136,6 +212,7 @@ Type=simple
 User=$SERVICE_USER
 Group=$SERVICE_GROUP
 WorkingDirectory=$INSTALL_DIR
+ExecStartPre=$FIX_SCRIPT
 ExecStart=$INSTALL_DIR/cloudawsync -config=$CONFIG_DIR/config.yaml -daemon=true
 Restart=always
 RestartSec=5
@@ -146,8 +223,8 @@ SyslogIdentifier=cloudawsync
 # Security settings
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=read-only
+ProtectSystem=full
+PermissionsStartOnly=true
 ReadWritePaths=$LOG_DIR $CONFIG_DIR
 
 # Resource limits
@@ -228,6 +305,19 @@ show_final_instructions() {
     echo "   - Configure directories to sync"
     echo "   - Adjust security and performance settings"
     echo
+    log_warning "IMPORTANT: The service runs as user '$SERVICE_USER' and is sandboxed by systemd."
+    log_warning "For it to access your sync directories, you must grant permissions:"
+    echo
+    echo "   A. Edit the systemd service to allow path access. Run:"
+    echo "      sudo systemctl edit cloudawsync.service"
+    echo "      Then add the following, replacing with your actual paths, save and exit:"
+    echo "      [Service]"
+    echo "      ReadWritePaths=$LOG_DIR $CONFIG_DIR /path/to/your/sync/dir1 /path/to/your/sync/dir2"
+    echo
+    echo "   B. Grant the '$SERVICE_USER' user read permissions on the filesystem. For each directory:"
+    echo "      sudo setfacl -R -m u:$SERVICE_USER:rX /path/to/your/sync/dir1"
+    echo "      (You may need to install ACL tools: sudo apt-get install acl)"
+    echo
     echo "2. Enable and start the service:"
     echo "   systemctl enable cloudawsync"
     echo "   systemctl start cloudawsync"
@@ -271,6 +361,7 @@ uninstall() {
     # Remove files
     rm -f /etc/systemd/system/cloudawsync.service
     rm -f /etc/logrotate.d/cloudawsync
+    rm -f /usr/local/bin/cloudawsync-fix-perms.sh
     rm -f /etc/bash_completion.d/cloudawsync
     rm -rf "$INSTALL_DIR"
     rm -rf "$LOG_DIR"
