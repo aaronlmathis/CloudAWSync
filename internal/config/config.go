@@ -163,7 +163,10 @@ func LoadConfig(configPath string) (*Config, error) {
 	}
 
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		return config, nil // return default config if file doesn't exist
+		// Return default config with warning if no config file exists
+		fmt.Printf("Warning: No configuration file found at %s, using defaults\n", configPath)
+		fmt.Println("Run 'cloudawsync -generate-config' to create a sample configuration")
+		return config, nil
 	}
 
 	data, err := os.ReadFile(configPath)
@@ -208,46 +211,56 @@ func (c *Config) SaveConfig(configPath string) error {
 
 // Validate validates the configuration
 func (c *Config) Validate() error {
+	// AWS validation
+	if c.AWS.Region == "" {
+		return fmt.Errorf("AWS region is required")
+	}
 	if c.AWS.S3Bucket == "" {
 		return fmt.Errorf("AWS S3 bucket is required")
 	}
-
-	if c.Performance.MaxConcurrentUploads <= 0 {
-		return fmt.Errorf("max concurrent uploads must be positive")
+	if c.AWS.AccessKeyID == "" {
+		return fmt.Errorf("AWS access key ID is required")
+	}
+	if c.AWS.SecretAccessKey == "" {
+		return fmt.Errorf("AWS secret access key is required")
 	}
 
-	if c.Performance.MaxConcurrentDownloads <= 0 {
-		return fmt.Errorf("max concurrent downloads must be positive")
-	}
-
-	if c.Performance.UploadChunkSize <= 0 {
-		return fmt.Errorf("upload chunk size must be positive")
-	}
-
-	if c.Performance.DownloadChunkSize <= 0 {
-		return fmt.Errorf("download chunk size must be positive")
+	// Directories validation
+	if len(c.Directories) == 0 {
+		return fmt.Errorf("at least one directory must be configured for synchronization")
 	}
 
 	for i, dir := range c.Directories {
 		if dir.LocalPath == "" {
 			return fmt.Errorf("directory %d: local path is required", i)
 		}
-
-		if !filepath.IsAbs(dir.LocalPath) {
-			return fmt.Errorf("directory %d: local path must be absolute", i)
+		if dir.RemotePath == "" {
+			return fmt.Errorf("directory %d: remote path is required", i)
+		}
+		if dir.SyncMode == "" {
+			return fmt.Errorf("directory %d: sync mode is required", i)
 		}
 
-		if dir.SyncMode != interfaces.SyncModeRealtime &&
-			dir.SyncMode != interfaces.SyncModeScheduled &&
-			dir.SyncMode != interfaces.SyncModeBoth {
-			return fmt.Errorf("directory %d: invalid sync mode", i)
+		// Validate sync mode
+		switch dir.SyncMode {
+		case "realtime", "scheduled", "both":
+			// Valid modes
+		default:
+			return fmt.Errorf("directory %d: invalid sync mode '%s' (must be 'realtime', 'scheduled', or 'both')", i, dir.SyncMode)
 		}
 
-		if dir.SyncMode == interfaces.SyncModeScheduled || dir.SyncMode == interfaces.SyncModeBoth {
-			if dir.Schedule == "" {
-				return fmt.Errorf("directory %d: schedule is required for scheduled sync mode", i)
-			}
+		// Check if local path exists
+		if _, err := os.Stat(dir.LocalPath); os.IsNotExist(err) {
+			return fmt.Errorf("directory %d: local path '%s' does not exist", i, dir.LocalPath)
 		}
+	}
+
+	// Performance validation
+	if c.Performance.MaxConcurrentUploads <= 0 {
+		return fmt.Errorf("max concurrent uploads must be greater than 0")
+	}
+	if c.Performance.MaxConcurrentDownloads <= 0 {
+		return fmt.Errorf("max concurrent downloads must be greater than 0")
 	}
 
 	return nil

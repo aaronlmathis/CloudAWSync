@@ -23,7 +23,8 @@ package providers
 
 import (
 	"context"
-	"crypto/md5"
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -111,15 +112,12 @@ func NewS3Provider(cfg S3Config, logger *zap.Logger) (*S3Provider, error) {
 func (s *S3Provider) Upload(ctx context.Context, key string, reader io.Reader, metadata interfaces.FileMetadata) error {
 	key = s.addPrefix(key)
 
-	// Calculate MD5 hash while reading
-	hasher := md5.New()
-	teeReader := io.TeeReader(reader, hasher)
-
 	// Prepare upload input
 	input := &s3.PutObjectInput{
-		Bucket: aws.String(s.bucket),
-		Key:    aws.String(key),
-		Body:   teeReader,
+		Bucket:        aws.String(s.bucket),
+		Key:           aws.String(key),
+		Body:          reader,
+		ContentLength: aws.Int64(metadata.Size), // Explicitly set Content-Length
 	}
 
 	// Set metadata
@@ -128,11 +126,26 @@ func (s *S3Provider) Upload(ctx context.Context, key string, reader io.Reader, m
 		"upload-time":   time.Now().UTC().Format(time.RFC3339),
 		"content-type":  metadata.ContentType,
 		"permissions":   metadata.Permissions,
+		"md5-hash":      metadata.MD5Hash, // Store hex-encoded hash in metadata
 	}
 
 	// Set content type if available
 	if metadata.ContentType != "" {
 		input.ContentType = aws.String(metadata.ContentType)
+	}
+
+	// Convert hex MD5 hash to base64 for S3 ContentMD5 header
+	if metadata.MD5Hash != "" {
+		hexBytes, err := hex.DecodeString(metadata.MD5Hash)
+		if err != nil {
+			s.logger.Warn("Invalid MD5 hash format, skipping ContentMD5 header",
+				zap.String("hash", metadata.MD5Hash),
+				zap.Error(err))
+		} else {
+			// Convert to base64
+			base64Hash := base64.StdEncoding.EncodeToString(hexBytes)
+			input.ContentMD5 = aws.String(base64Hash)
+		}
 	}
 
 	// Set storage class if configured
@@ -150,22 +163,15 @@ func (s *S3Provider) Upload(ctx context.Context, key string, reader io.Reader, m
 	if err != nil {
 		s.logger.Error("Failed to upload file to S3",
 			zap.String("key", key),
+			zap.Int64("size", metadata.Size),
 			zap.Error(err))
 		return fmt.Errorf("failed to upload file: %w", err)
 	}
 
-	// Verify MD5 hash
-	uploadedHash := fmt.Sprintf("%x", hasher.Sum(nil))
-	if metadata.MD5Hash != "" && metadata.MD5Hash != uploadedHash {
-		s.logger.Warn("MD5 hash mismatch after upload",
-			zap.String("key", key),
-			zap.String("expected", metadata.MD5Hash),
-			zap.String("actual", uploadedHash))
-	}
-
 	s.logger.Info("Successfully uploaded file to S3",
 		zap.String("key", key),
-		zap.Int64("size", metadata.Size))
+		zap.Int64("size", metadata.Size),
+		zap.String("md5", metadata.MD5Hash))
 
 	return nil
 }

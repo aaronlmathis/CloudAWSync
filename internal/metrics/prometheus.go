@@ -41,8 +41,10 @@ import (
 
 // PrometheusCollector implements the MetricsCollector interface using Prometheus metrics
 type PrometheusCollector struct {
-	logger *zap.Logger
-	server *http.Server
+	logger      *zap.Logger
+	server      *http.Server
+	port        int
+	metricsPath string
 
 	// Prometheus metrics
 	bandwidthUp       prometheus.Counter
@@ -74,21 +76,14 @@ type PrometheusCollector struct {
 func NewPrometheusCollector(logger *zap.Logger, port int, path string, collectInterval time.Duration) *PrometheusCollector {
 	collector := &PrometheusCollector{
 		logger:          logger,
+		port:            port,
+		metricsPath:     path,
 		collectInterval: collectInterval,
 		stopChan:        make(chan struct{}),
 	}
 
 	// Initialize Prometheus metrics
 	collector.initMetrics()
-
-	// Setup HTTP server for metrics endpoint
-	mux := http.NewServeMux()
-	mux.Handle(path, promhttp.Handler())
-
-	collector.server = &http.Server{
-		Addr:    fmt.Sprintf(":%d", port),
-		Handler: mux,
-	}
 
 	return collector
 }
@@ -199,13 +194,30 @@ func (p *PrometheusCollector) initMetrics() {
 
 // Start starts the metrics collector
 func (p *PrometheusCollector) Start(ctx context.Context) error {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
+	if p.server != nil {
+		return fmt.Errorf("metrics server already running")
+	}
+
 	// Start metrics collection goroutine
 	go p.collectSystemMetrics(ctx)
 
 	// Start HTTP server
+	mux := http.NewServeMux()
+	mux.Handle(p.metricsPath, promhttp.Handler())
+
+	p.server = &http.Server{
+		Addr:    fmt.Sprintf(":%d", p.port),
+		Handler: mux,
+	}
+
 	go func() {
 		p.logger.Info("Starting metrics server",
-			zap.String("address", p.server.Addr))
+			zap.Int("port", p.port),
+			zap.String("path", p.metricsPath))
+
 		if err := p.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			p.logger.Error("Metrics server error", zap.Error(err))
 		}
@@ -216,18 +228,23 @@ func (p *PrometheusCollector) Start(ctx context.Context) error {
 
 // Stop stops the metrics collector
 func (p *PrometheusCollector) Stop() error {
-	close(p.stopChan)
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+
+	if p.server == nil {
+		return nil
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := p.server.Shutdown(ctx); err != nil {
-		p.logger.Error("Failed to shutdown metrics server", zap.Error(err))
-		return err
-	}
+	err := p.server.Shutdown(ctx)
+	p.server = nil
 
-	p.logger.Info("Metrics collector stopped")
-	return nil
+	close(p.stopChan)
+
+	p.logger.Info("Metrics server stopped")
+	return err
 }
 
 // RecordBandwidth records bandwidth usage
@@ -362,72 +379,4 @@ func (p *PrometheusCollector) updateSystemMetrics() {
 	p.mutex.Lock()
 	p.currentMetrics.ActiveGoroutines = goroutines
 	p.mutex.Unlock()
-}
-
-// SimpleCollector is a basic metrics collector without Prometheus
-type SimpleCollector struct {
-	mutex   sync.RWMutex
-	metrics interfaces.Metrics
-	logger  *zap.Logger
-}
-
-// NewSimpleCollector creates a new simple metrics collector
-func NewSimpleCollector(logger *zap.Logger) *SimpleCollector {
-	return &SimpleCollector{
-		logger: logger,
-	}
-}
-
-// RecordBandwidth records bandwidth usage
-func (s *SimpleCollector) RecordBandwidth(bytes int64, direction string) {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
-	switch direction {
-	case "up", "upload":
-		s.metrics.BandwidthUp += bytes
-	case "down", "download":
-		s.metrics.BandwidthDown += bytes
-	}
-}
-
-// RecordFileOperation records file operation metrics
-func (s *SimpleCollector) RecordFileOperation(operation string, duration time.Duration, success bool) {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
-	if success {
-		switch operation {
-		case "upload":
-			s.metrics.SyncStats.FilesUploaded++
-		case "download":
-			s.metrics.SyncStats.FilesDownloaded++
-		case "delete":
-			s.metrics.SyncStats.FilesDeleted++
-		}
-		s.metrics.SyncStats.LastSyncTime = time.Now()
-	} else {
-		s.metrics.SyncStats.SyncErrors++
-	}
-}
-
-// RecordMemoryUsage records memory usage
-func (s *SimpleCollector) RecordMemoryUsage(bytes int64) {
-	s.mutex.Lock()
-	s.metrics.MemoryUsage = bytes
-	s.mutex.Unlock()
-}
-
-// RecordCPUUsage records CPU usage
-func (s *SimpleCollector) RecordCPUUsage(percent float64) {
-	s.mutex.Lock()
-	s.metrics.CPUUsage = percent
-	s.mutex.Unlock()
-}
-
-// GetMetrics returns current metrics
-func (s *SimpleCollector) GetMetrics() interfaces.Metrics {
-	s.mutex.RLock()
-	defer s.mutex.RUnlock()
-	return s.metrics
 }

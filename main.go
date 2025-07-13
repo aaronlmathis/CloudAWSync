@@ -128,12 +128,16 @@ func main() {
 
 	// Run as daemon
 	if *daemon {
-		logger.Info("Running as daemon")
+		logger.Info("Running as daemon, waiting for signals...")
 		svc.Wait()
 	} else {
 		// For testing/development, run for a short time
 		logger.Info("Running in non-daemon mode for testing")
 		time.Sleep(30 * time.Second)
+		logger.Info("Test run completed, stopping service")
+		if err := svc.Stop(); err != nil {
+			logger.Error("Error stopping service", zap.Error(err))
+		}
 	}
 
 	// Graceful shutdown

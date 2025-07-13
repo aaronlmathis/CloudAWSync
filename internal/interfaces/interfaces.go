@@ -74,6 +74,12 @@ type SyncEngine interface {
 
 // MetricsCollector defines the interface for metrics collection
 type MetricsCollector interface {
+	// Start starts the metrics collector
+	Start(ctx context.Context) error
+
+	// Stop stops the metrics collector
+	Stop() error
+
 	// RecordBandwidth records bandwidth usage
 	RecordBandwidth(bytes int64, direction string)
 

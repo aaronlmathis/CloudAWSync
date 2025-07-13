@@ -92,17 +92,25 @@ func (s *Service) Start() error {
 	s.logger.Info("Starting CloudAWSync service")
 
 	// Start metrics collector
-	if s.config.Metrics.Enabled {
-		if err := s.metrics.(*metrics.PrometheusCollector).Start(s.ctx); err != nil {
+	if s.config.Metrics.Enabled && s.metrics != nil {
+		if err := s.metrics.Start(s.ctx); err != nil {
 			s.logger.Error("Failed to start metrics collector", zap.Error(err))
 			return fmt.Errorf("failed to start metrics collector: %w", err)
 		}
-		s.logger.Info("Metrics collector started")
+		s.logger.Info("Metrics collector started",
+			zap.Int("port", s.config.Metrics.Port),
+			zap.String("path", s.config.Metrics.Path))
 	}
 
 	// Add directories to sync engine
 	for _, dir := range s.config.Directories {
-		s.engine.(*engine.Engine).AddDirectory(dir)
+		if engineImpl, ok := s.engine.(*engine.Engine); ok {
+			engineImpl.AddDirectory(dir)
+			s.logger.Info("Added directory to sync engine",
+				zap.String("local_path", dir.LocalPath),
+				zap.String("remote_path", dir.RemotePath),
+				zap.String("sync_mode", string(dir.SyncMode)))
+		}
 	}
 
 	// Start sync engine
@@ -110,6 +118,7 @@ func (s *Service) Start() error {
 		s.logger.Error("Failed to start sync engine", zap.Error(err))
 		return fmt.Errorf("failed to start sync engine: %w", err)
 	}
+	s.logger.Info("Sync engine started successfully")
 
 	s.running = true
 	s.logger.Info("CloudAWSync service started successfully")
@@ -282,22 +291,32 @@ func (s *Service) initializeComponents() error {
 	var err error
 
 	// Initialize cloud provider
+	s.logger.Info("Creating cloud provider...")
 	s.provider, err = s.createCloudProvider()
 	if err != nil {
+		s.logger.Error("Failed to create cloud provider", zap.Error(err))
 		return fmt.Errorf("failed to create cloud provider: %w", err)
 	}
+	s.logger.Info("Cloud provider created successfully")
 
 	// Initialize file watcher
+	s.logger.Info("Creating file watcher...")
 	s.watcher, err = s.createFileWatcher()
 	if err != nil {
+		s.logger.Error("Failed to create file watcher", zap.Error(err))
 		return fmt.Errorf("failed to create file watcher: %w", err)
 	}
+	s.logger.Info("File watcher created successfully")
 
 	// Initialize metrics collector
+	s.logger.Info("Creating metrics collector...")
 	s.metrics = s.createMetricsCollector()
+	s.logger.Info("Metrics collector created successfully")
 
 	// Initialize sync engine
+	s.logger.Info("Creating sync engine...")
 	s.engine = s.createSyncEngine()
+	s.logger.Info("Sync engine created successfully")
 
 	s.logger.Info("All components initialized successfully")
 	return nil

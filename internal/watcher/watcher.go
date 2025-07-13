@@ -61,6 +61,8 @@ func NewFSWatcher(logger *zap.Logger) (*FSWatcher, error) {
 
 // Watch starts watching the specified directories
 func (w *FSWatcher) Watch(ctx context.Context, dirs []string) (<-chan interfaces.FileEvent, error) {
+	w.logger.Info("Starting file watcher", zap.Strings("directories", dirs))
+
 	// Add directories to watcher
 	for _, dir := range dirs {
 		if err := w.addDirectory(dir); err != nil {
@@ -69,13 +71,14 @@ func (w *FSWatcher) Watch(ctx context.Context, dirs []string) (<-chan interfaces
 				zap.Error(err))
 			continue
 		}
-		w.logger.Info("Started watching directory",
+		w.logger.Info("Successfully added directory to watcher",
 			zap.String("directory", dir))
 	}
 
 	// Start event processing goroutine
 	go w.processEvents(ctx)
 
+	w.logger.Info("File watcher started successfully")
 	return w.eventChan, nil
 }
 
@@ -102,6 +105,8 @@ func (w *FSWatcher) SetFilters(filters []string) {
 
 // addDirectory adds a directory to the watcher recursively
 func (w *FSWatcher) addDirectory(dir string) error {
+	w.logger.Info("Adding directory to watcher", zap.String("directory", dir))
+
 	return filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			w.logger.Warn("Error walking directory",
@@ -151,8 +156,13 @@ func (w *FSWatcher) processEvents(ctx context.Context) {
 
 // handleEvent handles a single file system event
 func (w *FSWatcher) handleEvent(event fsnotify.Event) {
+	w.logger.Debug("Raw file system event",
+		zap.String("path", event.Name),
+		zap.String("op", event.Op.String()))
+
 	// Skip if file matches filter patterns
 	if w.shouldSkipFile(event.Name) {
+		w.logger.Debug("Skipping filtered file", zap.String("path", event.Name))
 		return
 	}
 
@@ -177,7 +187,7 @@ func (w *FSWatcher) handleEvent(event fsnotify.Event) {
 					zap.String("path", event.Name),
 					zap.Error(err))
 			} else {
-				w.logger.Debug("Added new directory to watcher",
+				w.logger.Info("Added new directory to watcher",
 					zap.String("path", event.Name))
 			}
 		}
@@ -189,6 +199,7 @@ func (w *FSWatcher) handleEvent(event fsnotify.Event) {
 		fileEvent.Operation = "move"
 	case event.Op&fsnotify.Chmod == fsnotify.Chmod:
 		// Skip chmod events as they don't affect file content
+		w.logger.Debug("Skipping chmod event", zap.String("path", event.Name))
 		return
 	default:
 		w.logger.Debug("Unknown file event",
@@ -197,7 +208,7 @@ func (w *FSWatcher) handleEvent(event fsnotify.Event) {
 		return
 	}
 
-	w.logger.Debug("File event detected",
+	w.logger.Info("File event detected",
 		zap.String("path", fileEvent.Path),
 		zap.String("operation", fileEvent.Operation),
 		zap.Bool("isDir", fileEvent.IsDir))
@@ -205,6 +216,9 @@ func (w *FSWatcher) handleEvent(event fsnotify.Event) {
 	// Send event to channel (non-blocking)
 	select {
 	case w.eventChan <- fileEvent:
+		w.logger.Debug("File event sent to channel",
+			zap.String("path", fileEvent.Path),
+			zap.String("operation", fileEvent.Operation))
 	default:
 		w.logger.Warn("Event channel full, dropping event",
 			zap.String("path", fileEvent.Path),

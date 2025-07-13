@@ -412,9 +412,16 @@ func (e *Engine) uploadFile(ctx context.Context, task syncTask) error {
 	}
 	defer file.Close()
 
+	// Get file info to determine size
+	fileInfo, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("failed to get file info: %w", err)
+	}
+	fileSize := fileInfo.Size()
+
 	// Calculate MD5 hash
 	hasher := md5.New()
-	size, err := io.Copy(hasher, file)
+	_, err = io.Copy(hasher, file)
 	if err != nil {
 		return fmt.Errorf("failed to calculate MD5: %w", err)
 	}
@@ -425,7 +432,7 @@ func (e *Engine) uploadFile(ctx context.Context, task syncTask) error {
 	}
 
 	metadata := interfaces.FileMetadata{
-		Size:        size,
+		Size:        fileSize, // Use the size from file info
 		ModTime:     task.fileInfo.ModTime(),
 		MD5Hash:     fmt.Sprintf("%x", hasher.Sum(nil)),
 		ContentType: e.getContentType(task.localPath),
@@ -433,7 +440,7 @@ func (e *Engine) uploadFile(ctx context.Context, task syncTask) error {
 	}
 
 	// Record bandwidth
-	e.metrics.RecordBandwidth(size, "upload")
+	e.metrics.RecordBandwidth(fileSize, "upload")
 
 	err = e.provider.Upload(ctx, task.remotePath, file, metadata)
 	if err != nil {
@@ -625,13 +632,21 @@ func (e *Engine) startFileWatcher(ctx context.Context) error {
 	for _, dir := range e.directories {
 		if (dir.SyncMode == interfaces.SyncModeRealtime || dir.SyncMode == interfaces.SyncModeBoth) && dir.Enabled {
 			dirs = append(dirs, dir.LocalPath)
+			e.logger.Info("Adding directory to file watcher",
+				zap.String("path", dir.LocalPath),
+				zap.String("sync_mode", string(dir.SyncMode)),
+				zap.Bool("enabled", dir.Enabled))
 		}
 	}
 	e.mutex.RUnlock()
 
 	if len(dirs) == 0 {
+		e.logger.Warn("No directories configured for realtime sync")
 		return nil
 	}
+
+	e.logger.Info("Starting file watcher for directories",
+		zap.Strings("directories", dirs))
 
 	events, err := e.watcher.Watch(ctx, dirs)
 	if err != nil {
@@ -647,16 +662,25 @@ func (e *Engine) startFileWatcher(ctx context.Context) error {
 func (e *Engine) handleFileEvents(ctx context.Context, events <-chan interfaces.FileEvent) {
 	defer e.wg.Done()
 
+	e.logger.Info("File event handler started")
+
 	for {
 		select {
 		case <-ctx.Done():
+			e.logger.Info("File event handler stopping due to context cancellation")
 			return
 		case <-e.stopChan:
+			e.logger.Info("File event handler stopping due to stop signal")
 			return
 		case event, ok := <-events:
 			if !ok {
+				e.logger.Info("File event channel closed")
 				return
 			}
+			e.logger.Debug("Received file event",
+				zap.String("path", event.Path),
+				zap.String("operation", event.Operation),
+				zap.Bool("is_dir", event.IsDir))
 			e.processFileEvent(ctx, event)
 		}
 	}
@@ -664,6 +688,7 @@ func (e *Engine) handleFileEvents(ctx context.Context, events <-chan interfaces.
 
 func (e *Engine) processFileEvent(ctx context.Context, event interfaces.FileEvent) {
 	if event.IsDir {
+		e.logger.Debug("Skipping directory event", zap.String("path", event.Path))
 		return // Skip directory events
 	}
 
@@ -674,6 +699,9 @@ func (e *Engine) processFileEvent(ctx context.Context, event interfaces.FileEven
 		if strings.HasPrefix(event.Path, dir.LocalPath) && dir.Enabled {
 			if dir.SyncMode == interfaces.SyncModeRealtime || dir.SyncMode == interfaces.SyncModeBoth {
 				matchedDir = &dir
+				e.logger.Debug("Found matching directory for event",
+					zap.String("event_path", event.Path),
+					zap.String("directory", dir.LocalPath))
 				break
 			}
 		}
@@ -681,15 +709,21 @@ func (e *Engine) processFileEvent(ctx context.Context, event interfaces.FileEven
 	e.mutex.RUnlock()
 
 	if matchedDir == nil {
+		e.logger.Debug("No matching directory found for event", zap.String("path", event.Path))
 		return
 	}
 
 	if !e.shouldSyncFile(event.Path, matchedDir.Filters) {
+		e.logger.Debug("File filtered out", zap.String("path", event.Path))
 		return
 	}
 
 	switch event.Operation {
 	case "create", "modify":
+		e.logger.Info("Processing file change event",
+			zap.String("path", event.Path),
+			zap.String("operation", event.Operation))
+
 		// Queue for upload
 		if info, err := os.Stat(event.Path); err == nil {
 			relativePath := e.getRelativePath(event.Path, matchedDir.LocalPath)
@@ -704,16 +738,29 @@ func (e *Engine) processFileEvent(ctx context.Context, event interfaces.FileEven
 
 			select {
 			case e.uploadQueue <- task:
+				e.logger.Info("Queued file for upload",
+					zap.String("local_path", event.Path),
+					zap.String("remote_path", remotePath))
 			case <-ctx.Done():
 				return
 			default:
 				e.logger.Warn("Upload queue full, dropping task",
 					zap.String("path", event.Path))
 			}
+		} else {
+			e.logger.Error("Failed to stat file after event",
+				zap.String("path", event.Path),
+				zap.Error(err))
 		}
 	case "delete":
+		e.logger.Info("File deletion detected",
+			zap.String("path", event.Path))
 		// Queue for deletion (if implemented)
 		// For now, we'll skip deletion sync for safety
+	default:
+		e.logger.Debug("Unhandled file operation",
+			zap.String("path", event.Path),
+			zap.String("operation", event.Operation))
 	}
 }
 
