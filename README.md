@@ -33,8 +33,6 @@ CloudAWSync is a cloud file synchronization agent written in Go. It provides rea
 
 ### Installation Methods
 
-#### Method 1: Automated Installation (Recommended)
-
 CloudAWSync includes an installation script that handles system setup, user creation, and service configuration automatically:
 
 ```bash
@@ -49,45 +47,21 @@ chmod +x install.sh
 sudo ./install.sh install
 ```
 
-#### Method 2: Manual Installation
-
-1. **Download and Build**:
+### Docker Deployment
 ```bash
-git clone https://github.com/aaronlmathis/CloudAWSync.git
-cd CloudAWSync
-go mod tidy
-go build -o cloudawsync
+# Build image
+docker build -t cloudawsync:latest .
+
+# Run container
+docker-compose up -d
+
+# View logs
+docker-compose logs -f cloudawsync
 ```
 
-2. **Generate Configuration**:
-```bash
-./cloudawsync -generate-config
-```
-
-3. **Edit Configuration**:
-Edit `cloudawsync-config.yaml` to configure your AWS credentials and sync directories.
-
-4. **Run the Service**:
-```bash
-# Test run (foreground)
-./cloudawsync -daemon=false -log-level=debug
-
-# Production run (background)
-./cloudawsync
-```
-
-## Installation Script Reference
+### Installation Script Reference
 
 The `install.sh` script provides complete installation and management capabilities for CloudAWSync. It automates system user creation, directory setup, service installation, and maintenance tasks.
-
-### Script Features
-
-- **Automated Dependency Management**: Checks and installs Go if needed
-- **System User Creation**: Creates dedicated `cloudawsync` user and group
-- **Security Hardening**: Implements proper file permissions and systemd security
-- **Service Management**: Full systemd service lifecycle management
-- **Log Management**: Configures log rotation and bash completion
-- **Easy Maintenance**: Built-in update, backup, and monitoring commands
 
 ### Basic Usage
 
@@ -195,6 +169,8 @@ After installation, CloudAWSync uses this directory structure:
 └── cloudawsync                # Bash completion script
 ```
 
+---
+
 ### SystemD Service Configuration
 
 The script creates a production-ready systemd service with security hardening:
@@ -232,39 +208,7 @@ CPUQuota=50%
 WantedBy=multi-user.target
 ```
 
-### Security Features
-
-The installation script implements several security best practices:
-
-- **Dedicated User**: Runs as non-privileged `cloudawsync` system user
-- **Minimal Permissions**: Restrictive file permissions (755 for binary, 644 for config)
-- **SystemD Security**: NoNewPrivileges, PrivateTmp, ProtectSystem restrictions
-- **Resource Limits**: Memory and CPU quotas to prevent resource exhaustion
-- **Secure Directories**: Proper ownership and permissions for all directories
-
-### Example Installation Workflow
-
-#### First-time Installation
-
-```bash
-# 1. Clone and prepare
-git clone https://github.com/aaronlmathis/CloudAWSync.git
-cd CloudAWSync
-chmod +x install.sh
-
-# 2. Install with all dependencies
-sudo ./install.sh install
-
-# 3. Configure AWS credentials and directories
-sudo nano /etc/cloudawsync/config.yaml
-
-# 4. Enable and start the service  
-sudo systemctl enable cloudawsync
-sudo systemctl start cloudawsync
-
-# 5. Verify installation
-sudo ./install.sh status
-```
+---
 
 #### Post-Installation Configuration
 
@@ -487,6 +431,8 @@ sudo systemctl status cloudawsync
 journalctl -u cloudawsync -f
 ```
 
+---
+
 ## Configuration Reference
 
 ### AWS Configuration
@@ -541,6 +487,8 @@ Structured logging with configurable levels and outputs:
 - **Outputs**: file, stdout
 - **Rotation**: Configurable log rotation
 
+---
+
 ## Architecture
 
 ### Components
@@ -567,18 +515,7 @@ File System Events → File Watcher → Sync Engine → Cloud Provider
 - **Rate Limiting**: Configurable concurrency limits
 - **Graceful Shutdown**: Proper resource cleanup
 
-## Docker Deployment
-```bash
-# Build image
-docker build -t cloudawsync:latest .
-
-# Run container
-docker-compose up -d
-
-# View logs
-docker-compose logs -f cloudawsync
-```
-
+---
 
 ## Security Considerations
 
@@ -599,6 +536,8 @@ docker-compose logs -f cloudawsync
 - Secure defaults
 - Audit logging
 - Error handling without information leakage
+
+---
 
 ## Development
 
@@ -682,6 +621,8 @@ Monitor service health using:
 - Logs: `journalctl -u cloudawsync -f`
 - Metrics: `curl http://localhost:9090/metrics`
 
+---
+
 ## Performance Optimization
 
 ### Tuning Guidelines
@@ -716,13 +657,4 @@ This project is licensed under the GNU General Public License v3.0 or later. See
 - **Documentation**: This README and inline code comments
 - **Security**: Report security issues privately
 
-## Roadmap
 
-- [ ] Additional cloud providers (Google Cloud, Azure)
-- [ ] Bidirectional sync support
-- [ ] Conflict resolution strategies
-- [ ] Web-based configuration interface
-- [ ] Advanced scheduling options
-- [ ] Compression support
-- [ ] Deduplication
-- [ ] Bandwidth scheduling
