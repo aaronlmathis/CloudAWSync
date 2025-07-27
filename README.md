@@ -1,6 +1,6 @@
 # CloudAWSync - Cloud File Synchronization Agent
 
-CloudAWSync is a cloud file synchronization agent written in Go. It provides real-time and scheduled synchronization between local directories and cloud storage (currently AWS S3), with support for multiple sync modes, comprehensive monitoring, and security features.
+CloudAWSync is a cloud file synchronization agent written in Go. It provides real-time and scheduled synchronization between local directories and cloud storage (currently AWS S3), with support for multiple sync modes, monitoring, and security features.
 
 ## Features
 
